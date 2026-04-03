@@ -53,15 +53,15 @@ def fetch_everytime_timetable(url: str) -> dict:
 
     tds = table.find_all("td")
 
-    def round_to_15(minutes: float) -> int:
-        return int(round(minutes / 15.0) * 15)
+    def round_to_5(minutes: float) -> int:
+        return int(round(minutes / 5.0) * 5)
 
     def px_to_minutes(px: int) -> int:
-        # 현재 시간표 UI에서 top px와 분 단위를 1:1로 매핑 후 15분 단위 보정
-        return round_to_15(px)
+        # 현재 시간표 UI에서 top px와 분 단위를 1:1로 매핑 후 5분 단위 보정
+        return round_to_5(px)
 
     def duration_from_height(height: int) -> int:
-        return max(15, round_to_15(height))
+        return max(5, round_to_5(height))
 
     def minutes_to_time(total_minutes: int) -> str:
         total_minutes = max(0, total_minutes)

@@ -76,19 +76,19 @@ def fetch_everytime_timetable(url):
 		raise ValueError('시간표 table(tablebody)를 찾을 수 없습니다.')
 	tds = table.find_all('td')
 
-	def round_to_15(minutes):
-		# 가장 가까운 15분 단위로 보정
-		return int(round(minutes / 15.0) * 15)
+	def round_to_5(minutes):
+		# 가장 가까운 5분 단위로 보정
+		return int(round(minutes / 5.0) * 5)
 
 	def px_to_minutes(px):
 		# 현재 에브리타임 UI에서는 subject top 픽셀이 자정(00:00) 기준 분과 거의 1:1로 매핑됨
 		raw_minutes = px
-		return round_to_15(raw_minutes)
+		return round_to_5(raw_minutes)
 
 	def get_minutes_from_height(height):
 		raw_duration = height
-		duration = round_to_15(raw_duration)
-		return max(15, duration)
+		duration = round_to_5(raw_duration)
+		return max(5, duration)
 
 	def minutes_to_time(total_minutes):
 		total_minutes = max(0, total_minutes)

@@ -1,0 +1,2 @@
+# plannerserver
+SNUPL 앱 

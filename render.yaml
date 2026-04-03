@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: everytime-timetable-api
+    env: docker
+    plan: free
+    autoDeploy: true

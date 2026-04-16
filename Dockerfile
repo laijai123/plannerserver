@@ -6,6 +6,9 @@ ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y \
     chromium \
     chromium-driver \
+    tesseract-ocr \
+    tesseract-ocr-kor \
+    tesseract-ocr-eng \
     ca-certificates \
     fonts-liberation \
     --no-install-recommends && \

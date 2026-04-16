@@ -1,3 +1,5 @@
+import base64
+
 from flask import Flask, jsonify, request
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -7,6 +9,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import re
+
+from ocr_utils import (
+    OCRRequestError,
+    analyze_timetable_image,
+)
 
 
 app = Flask(__name__)
@@ -121,6 +128,43 @@ def timetable() -> tuple:
     try:
         data = fetch_everytime_timetable(url)
         return jsonify(data), 200
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.post("/ocr/timetable")
+def ocr_timetable() -> tuple:
+    """
+    Accept a timetable screenshot and extract timetable data using local OCR.
+
+    Supported inputs:
+    - multipart/form-data with file field: image or img
+    - JSON with image_base64
+    - JSON with image_url
+    """
+    image_file = request.files.get("image") or request.files.get("img")
+    image_base64 = None
+    image_url = None
+
+    if image_file:
+        image_base64 = base64.b64encode(image_file.read()).decode("utf-8")
+    else:
+        payload = request.get_json(silent=True) or {}
+        image_base64 = (payload.get("image_base64") or "").strip() or None
+        image_url = (payload.get("image_url") or "").strip() or None
+
+    if not image_base64 and not image_url:
+        return jsonify({"error": "image (file), image_base64, or image_url is required"}), 400
+
+    try:
+        if image_base64:
+            image_bytes = base64.b64decode(image_base64)
+            result = analyze_timetable_image(image_bytes=image_bytes)
+        else:
+            result = analyze_timetable_image(image_url=image_url)
+        return jsonify(result), 200
+    except OCRRequestError as exc:
+        return jsonify({"error": str(exc)}), 500
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

@@ -131,16 +131,20 @@ def _extract_time_scale(image: np.ndarray) -> Tuple[float, float, List[Tuple[flo
     height, width = image.shape[:2]
     left_width = max(120, int(width * 0.18))
     left_crop = image[:, :left_width]
-    left_crop = _resize(left_crop, 2.0)
+    left_crop = _resize(left_crop, 1.5)
     gray = cv2.cvtColor(left_crop, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
 
-    data = pytesseract.image_to_data(
-        gray,
-        output_type=Output.DICT,
-        lang="kor+eng",
-        config="--oem 3 --psm 6",
-    )
+    try:
+        data = pytesseract.image_to_data(
+            gray,
+            output_type=Output.DICT,
+            lang="kor+eng",
+            config="--oem 3 --psm 6",
+            timeout=10,
+        )
+    except RuntimeError:
+        return 1.0, 0.0, []
 
     grouped: Dict[Tuple[int, int, int], List[Tuple[int, int, int, str]]] = defaultdict(list)
     for index, raw_text in enumerate(data["text"]):
@@ -189,29 +193,18 @@ def _extract_time_scale(image: np.ndarray) -> Tuple[float, float, List[Tuple[flo
 
 
 def _ocr_block_text(crop: np.ndarray) -> str:
-    enlarged = _resize(crop, 2.5)
+    enlarged = _resize(crop, 1.8)
     gray = cv2.cvtColor(enlarged, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (3, 3), 0)
-
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    _, binary_inv = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-    configs = [
-        (gray, "--oem 3 --psm 6"),
-        (binary, "--oem 3 --psm 6"),
-        (binary_inv, "--oem 3 --psm 6"),
-    ]
-    candidates: List[str] = []
-    for image, config in configs:
-        text = pytesseract.image_to_string(image, lang="kor+eng", config=config)
-        cleaned = _clean_text(text)
-        if cleaned:
-            candidates.append(cleaned)
-
-    if not candidates:
+    try:
+        text = pytesseract.image_to_string(binary, lang="kor+eng", config="--oem 3 --psm 6", timeout=8)
+    except RuntimeError:
         return ""
 
-    return max(candidates, key=len)
+    cleaned = _clean_text(text)
+    return cleaned
 
 
 def _parse_block_text(text: str) -> Dict[str, str]:

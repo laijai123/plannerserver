@@ -1,5 +1,5 @@
-# plannerserver
-SNUPL 앱 
+# plannerserver & OCR using claude
+SNUPL 앱 용 서버
 
 ## OCR timetable endpoint
 

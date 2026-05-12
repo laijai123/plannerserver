@@ -1,131 +1,123 @@
-import base64
 import json
 import os
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, ttk
 
-import requests
+from ocr_utils import (
+    OCRRequestError,
+    analyze_timetable_hybrid,
+    analyze_timetable_with_vision,
+    to_timetable_json,
+)
 
 
-DEFAULT_ENDPOINT = "https://everytime-timetable-api.onrender.com/ocr/timetable"
-
-
-class OCRTesterApp:
+class TimetableOCRApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Timetable OCR Tester")
-        self.root.geometry("860x620")
-
-        self.endpoint_var = tk.StringVar(value=DEFAULT_ENDPOINT)
-        self.image_path_var = tk.StringVar(value="")
-        self.upload_mode_var = tk.StringVar(value="multipart")
-        self.status_var = tk.StringVar(value="Ready")
-
+        self.root.title("Timetable Vision Tester")
+        self.root.geometry("700x540")
+        self._image_path = ""
         self._build_ui()
 
     def _build_ui(self) -> None:
-        container = ttk.Frame(self.root, padding=12)
-        container.pack(fill=tk.BOTH, expand=True)
+        frame = ttk.Frame(self.root, padding=12)
+        frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(container, text="OCR Endpoint").pack(anchor=tk.W)
-        ttk.Entry(container, textvariable=self.endpoint_var).pack(fill=tk.X, pady=(0, 8))
+        file_row = ttk.Frame(frame)
+        file_row.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(file_row, text="이미지:").pack(side=tk.LEFT)
+        self._path_var = tk.StringVar()
+        ttk.Entry(file_row, textvariable=self._path_var, state="readonly").pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6)
+        )
+        ttk.Button(file_row, text="Browse", command=self._browse).pack(side=tk.LEFT)
 
-        row = ttk.Frame(container)
-        row.pack(fill=tk.X)
+        btn_row = ttk.Frame(frame)
+        btn_row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(btn_row, text="Hybrid (권장)", command=self._run_hybrid).pack(side=tk.LEFT)
+        ttk.Button(btn_row, text="Vision API", command=self._run_vision).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(btn_row, text="Copy Result", command=self._copy).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(btn_row, text="Clear", command=self._clear).pack(side=tk.LEFT, padx=(8, 0))
 
-        ttk.Label(row, text="Image File").pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.image_path_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 8))
-        ttk.Button(row, text="Browse", command=self._browse_image).pack(side=tk.LEFT)
+        self._status_var = tk.StringVar(value="Ready")
+        ttk.Label(frame, textvariable=self._status_var, foreground="#555").pack(anchor=tk.W, pady=(0, 4))
 
-        mode_row = ttk.Frame(container)
-        mode_row.pack(fill=tk.X, pady=(10, 8))
-        ttk.Label(mode_row, text="Send Mode:").pack(side=tk.LEFT)
-        ttk.Radiobutton(mode_row, text="multipart/form-data", value="multipart", variable=self.upload_mode_var).pack(side=tk.LEFT, padx=(8, 6))
-        ttk.Radiobutton(mode_row, text="JSON base64", value="base64", variable=self.upload_mode_var).pack(side=tk.LEFT)
+        self._output = tk.Text(frame, wrap=tk.WORD, font=("Courier", 11))
+        scrollbar = ttk.Scrollbar(frame, command=self._output.yview)
+        self._output.configure(yscrollcommand=scrollbar.set)
+        self._output.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.LEFT, fill=tk.Y)
 
-        button_row = ttk.Frame(container)
-        button_row.pack(fill=tk.X, pady=(0, 8))
-        ttk.Button(button_row, text="Send Request", command=self._send_request).pack(side=tk.LEFT)
-        ttk.Button(button_row, text="Clear Output", command=self._clear_output).pack(side=tk.LEFT, padx=(8, 0))
-
-        ttk.Label(container, textvariable=self.status_var, foreground="#555").pack(anchor=tk.W, pady=(0, 6))
-
-        self.output = tk.Text(container, wrap=tk.WORD)
-        self.output.pack(fill=tk.BOTH, expand=True)
-
-    def _browse_image(self) -> None:
+    def _browse(self) -> None:
         path = filedialog.askopenfilename(
-            title="Select timetable screenshot",
-            filetypes=[("Image Files", "*.png *.jpg *.jpeg *.webp"), ("All Files", "*.*")],
+            title="시간표 이미지 선택",
+            filetypes=[("Images", "*.png *.jpg *.jpeg *.webp"), ("All", "*.*")],
         )
         if path:
-            self.image_path_var.set(path)
+            self._image_path = path
+            self._path_var.set(path)
 
-    def _clear_output(self) -> None:
-        self.output.delete("1.0", tk.END)
-        self.status_var.set("Ready")
-
-    def _send_request(self) -> None:
-        endpoint = self.endpoint_var.get().strip()
-        image_path = self.image_path_var.get().strip()
-
-        if not endpoint:
-            messagebox.showwarning("Missing endpoint", "Please enter an OCR endpoint URL.")
+    def _run_hybrid(self) -> None:
+        if not self._image_path or not os.path.isfile(self._image_path):
+            self._status_var.set("이미지 파일을 먼저 선택해주세요.")
             return
-        if not image_path:
-            messagebox.showwarning("Missing image", "Please choose an image file.")
+        self._status_var.set("Hybrid 분석 중...")
+        self._output.delete("1.0", tk.END)
+        threading.Thread(target=self._worker, args=("hybrid",), daemon=True).start()
+
+    def _run_vision(self) -> None:
+        if not self._image_path or not os.path.isfile(self._image_path):
+            self._status_var.set("이미지 파일을 먼저 선택해주세요.")
             return
-        if not os.path.isfile(image_path):
-            messagebox.showerror("File not found", f"Image file not found:\n{image_path}")
-            return
+        self._status_var.set("Vision API 분석 중...")
+        self._output.delete("1.0", tk.END)
+        threading.Thread(target=self._worker, args=("vision",), daemon=True).start()
 
-        self.status_var.set("Sending request...")
-        self.output.delete("1.0", tk.END)
-
-        thread = threading.Thread(target=self._request_worker, args=(endpoint, image_path), daemon=True)
-        thread.start()
-
-    def _request_worker(self, endpoint: str, image_path: str) -> None:
+    def _worker(self, mode: str) -> None:
         try:
-            mode = self.upload_mode_var.get()
-            if mode == "multipart":
-                with open(image_path, "rb") as image_file:
-                    files = {"image": (os.path.basename(image_path), image_file, "application/octet-stream")}
-                    response = requests.post(endpoint, files=files, timeout=420)
+            with open(self._image_path, "rb") as f:
+                image_bytes = f.read()
+            if mode == "hybrid":
+                result = analyze_timetable_hybrid(image_bytes=image_bytes)
             else:
-                with open(image_path, "rb") as image_file:
-                    image_base64 = base64.b64encode(image_file.read()).decode("utf-8")
-                payload = {"image_base64": image_base64}
-                headers = {"Content-Type": "application/json"}
-                response = requests.post(endpoint, data=json.dumps(payload), headers=headers, timeout=420)
+                result = analyze_timetable_with_vision(image_bytes=image_bytes)
+            timetable = to_timetable_json(result)
+            engine = result.get("engine", "")
+            formatted = json.dumps(timetable, ensure_ascii=False, indent=2)
+            self.root.after(0, self._show_result, f"// engine: {engine}\n{formatted}")
+        except OCRRequestError as exc:
+            self.root.after(0, self._show_error, str(exc))
+        except Exception as exc:
+            import traceback
+            self.root.after(0, self._show_error, f"{exc}\n\n{traceback.format_exc()}")
 
-            self._show_response(response)
-        except Exception as exc:  # pylint: disable=broad-except
-            self.root.after(0, self._render_error, str(exc))
+    def _show_result(self, text: str) -> None:
+        self._status_var.set("완료")
+        self._output.delete("1.0", tk.END)
+        self._output.insert(tk.END, text)
 
-    def _show_response(self, response: requests.Response) -> None:
-        try:
-            parsed = response.json()
-            formatted = json.dumps(parsed, ensure_ascii=False, indent=2)
-        except Exception:
-            formatted = response.text
+    def _show_error(self, msg: str) -> None:
+        self._status_var.set("오류")
+        self._output.delete("1.0", tk.END)
+        self._output.insert(tk.END, f"Error: {msg}")
 
-        status_line = f"HTTP {response.status_code}"
-        self.root.after(0, self._render_output, status_line, formatted)
+    def _copy(self) -> None:
+        text = self._output.get("1.0", tk.END).strip()
+        if text:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.root.update()
+            self._status_var.set("클립보드에 복사됨")
 
-    def _render_output(self, status: str, body: str) -> None:
-        self.status_var.set(status)
-        self.output.insert(tk.END, body)
-
-    def _render_error(self, message: str) -> None:
-        self.status_var.set("Request failed")
-        self.output.insert(tk.END, f"Error: {message}")
+    def _clear(self) -> None:
+        self._output.delete("1.0", tk.END)
+        self._status_var.set("Ready")
 
 
 def main() -> None:
     root = tk.Tk()
-    OCRTesterApp(root)
+    TimetableOCRApp(root)
     root.mainloop()
 
 
